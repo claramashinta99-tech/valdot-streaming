@@ -1,0 +1,82 @@
+name: Probe Sansekai API contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/probe-sansekai.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify response contracts used by Valdot
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, time, urllib.parse, urllib.request
+          BASE = "https://api.sansekai.my.id/api"
+          calls = 0
+          def get(path, params=None):
+              global calls
+              if calls:
+                  time.sleep(7)
+              calls += 1
+              url = BASE + path
+              if params:
+                  url += "?" + urllib.parse.urlencode(params)
+              req = urllib.request.Request(url, headers={"Accept":"application/json","Origin":"https://valdot.web.id","User-Agent":"Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=45) as res:
+                  data = json.load(res)
+                  print("HTTP", path, res.status, "cors=" + str(res.headers.get("Access-Control-Allow-Origin")))
+                  return data
+          def first_with(value, key):
+              if isinstance(value, dict):
+                  if value.get(key) not in (None, ""):
+                      return value
+                  for child in value.values():
+                      found = first_with(child, key)
+                      if found: return found
+              elif isinstance(value, list):
+                  for child in value:
+                      found = first_with(child, key)
+                      if found: return found
+              return None
+          def shape(value, depth=0):
+              if depth >= 3:
+                  return type(value).__name__
+              if isinstance(value, dict):
+                  return {k: shape(v, depth+1) for k,v in value.items()}
+              if isinstance(value, list):
+                  return [shape(value[0], depth+1)] if value else []
+              return type(value).__name__
+          drama = get("/dramabox/trending")
+          book = first_with(drama, "bookId")
+          episodes = get("/dramabox/allepisode", {"bookId": book["bookId"]})
+          ep = first_with(episodes, "videoPath")
+          decrypted = get("/dramabox/decrypt", {"url": ep["videoPath"]})
+          print("SHAPE dramabox.decrypt", json.dumps(shape(decrypted), ensure_ascii=False))
+
+          anime = get("/anime/latest")
+          anime_item = first_with(anime, "urlId")
+          print("SHAPE anime.latest", json.dumps(shape(anime), ensure_ascii=False))
+          anime_detail = get("/anime/detail", {"urlId": anime_item["urlId"]})
+          print("SHAPE anime.detail", json.dumps(shape(anime_detail), ensure_ascii=False))
+          chapter = first_with(anime_detail, "chapterUrlId")
+          anime_video = get("/anime/getvideo", {"chapterUrlId": chapter["chapterUrlId"], "reso":"480p"})
+          print("SHAPE anime.getvideo", json.dumps(shape(anime_video), ensure_ascii=False))
+
+          movies = get("/moviebox/k-drama")
+          movie = first_with(movies, "subjectId")
+          print("SHAPE moviebox.k-drama", json.dumps(shape(movies), ensure_ascii=False))
+          movie_detail = get("/moviebox/detail", {"subjectId": movie["subjectId"]})
+          print("SHAPE moviebox.detail", json.dumps(shape(movie_detail), ensure_ascii=False))
+          movie_video = get("/moviebox/get-download-url", {"subjectId": movie["subjectId"], "episode":0, "season":0})
+          print("SHAPE moviebox.get-download-url", json.dumps(shape(movie_video), ensure_ascii=False))
+          PY
