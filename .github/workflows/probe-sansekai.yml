@@ -15,106 +15,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Inspect published OpenAPI contract
+      - name: Extract routes from the published docs
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/sansekai
-          curl -fsSL --retry 2 https://api.sansekai.my.id/ -o /tmp/sansekai/index.html
-          for path in swagger-ui-init.js swagger.json openapi.json api-docs api-docs.json docs/json documentation/json; do
-            code=$(curl -sSL --retry 1 -o "/tmp/sansekai/${path//\//_}" -w "%{http_code}" "https://api.sansekai.my.id/$path" || true)
-            bytes=$(wc -c < "/tmp/sansekai/${path//\//_}" 2>/dev/null || echo 0)
-            echo "CANDIDATE /$path status=$code bytes=$bytes"
-          done
+          curl -fsSL --retry 2 https://api.sansekai.my.id/ -o /tmp/index.html
           python3 - <<'PY'
-          import json, pathlib, re
-          root = pathlib.Path("/tmp/sansekai")
-          docs = []
-          for path in root.iterdir():
-              text = path.read_text("utf-8", errors="ignore")
-              try:
-                  value = json.loads(text)
-                  if isinstance(value, dict) and isinstance(value.get("paths"), dict):
-                      docs.append((path.name, value))
-              except Exception:
-                  pass
-              marker = '"swaggerDoc":'
-              at = text.find(marker)
+          import pathlib, re
+          text = pathlib.Path("/tmp/index.html").read_text("utf-8", errors="ignore")
+          print("HTML_BYTES", len(text))
+          for needle in ("openapi", "SwaggerUIBundle", "paths", "spec:"):
+              at = text.find(needle)
+              print("MARKER", needle, at)
               if at >= 0:
-                  start = text.find("{", at + len(marker))
-                  depth = 0
-                  quoted = False
-                  escaped = False
-                  for i in range(start, len(text)):
-                      ch = text[i]
-                      if quoted:
-                          if escaped:
-                              escaped = False
-                          elif ch == "\\":
-                              escaped = True
-                          elif ch == '"':
-                              quoted = False
-                      elif ch == '"':
-                          quoted = True
-                      elif ch == "{":
-                          depth += 1
-                      elif ch == "}":
-                          depth -= 1
-                          if depth == 0:
-                              try:
-                                  value = json.loads(text[start:i+1])
-                                  if isinstance(value.get("paths"), dict):
-                                      docs.append((path.name + ":swaggerDoc", value))
-                              except Exception as error:
-                                  print("SWAGGER_PARSE_ERROR", path.name, error)
-                              break
-          seen = set()
-          for source, doc in docs:
-              signature = tuple(doc.get("paths", {}).keys())
-              if signature in seen:
-                  continue
-              seen.add(signature)
-              print(f"OPENAPI_SOURCE {source} title={doc.get('info',{}).get('title')} paths={len(signature)}")
-              for route, methods in doc.get("paths", {}).items():
-                  for method, operation in methods.items():
-                      if method.lower() not in {"get","post","put","patch","delete"}:
-                          continue
-                      params = []
-                      for param in operation.get("parameters", []):
-                          schema = param.get("schema", {})
-                          params.append(f"{param.get('name')}@{param.get('in')}:{schema.get('type','?')}{'*' if param.get('required') else ''}")
-                      print(f"CONTRACT {method.upper()} {route} | {operation.get('summary','')} | {','.join(params)}")
-          if not docs:
-              print("NO_OPENAPI_PARSED")
-              html = (root / "index.html").read_text("utf-8", errors="ignore")
-              for match in sorted(set(re.findall(r'(?:src|href)=[\"\']([^\"\']+)', html))):
-                  print("ASSET", match)
-          PY
-      - name: Inspect real DramaBox catalog and episodes
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, urllib.request
-          base = "https://api.sansekai.my.id/api/dramabox"
-          def get(url):
-              request = urllib.request.Request(url, headers={"Accept":"application/json","Origin":"https://valdot.web.id","User-Agent":"Mozilla/5.0"})
-              with urllib.request.urlopen(request, timeout=30) as response:
-                  return response.status, dict(response.headers), json.load(response)
-          status, headers, catalog = get(base + "/trending")
-          print("TRENDING", status, "cors=", headers.get("Access-Control-Allow-Origin"), "type=", type(catalog).__name__, "count=", len(catalog) if isinstance(catalog,list) else "-")
-          first = catalog[0] if isinstance(catalog,list) and catalog else catalog
-          print("CATALOG_KEYS", sorted(first.keys()) if isinstance(first,dict) else type(first).__name__)
-          book_id = str(first.get("bookId","")) if isinstance(first,dict) else ""
-          status, headers, episodes = get(base + "/allepisode?bookId=" + urllib.parse.quote(book_id))
-          print("ALLEPISODE", status, "cors=", headers.get("Access-Control-Allow-Origin"), "type=", type(episodes).__name__, "count=", len(episodes) if isinstance(episodes,list) else "-")
-          episode = episodes[0] if isinstance(episodes,list) and episodes else episodes
-          print("EPISODE_KEYS", sorted(episode.keys()) if isinstance(episode,dict) else type(episode).__name__)
-          if isinstance(episode,dict):
-              for key, value in episode.items():
-                  if isinstance(value,list) and value and isinstance(value[0],dict):
-                      print("NESTED_KEYS", key, sorted(value[0].keys()))
-                      for key2, value2 in value[0].items():
-                          if isinstance(value2,list) and value2 and isinstance(value2[0],dict):
-                              print("NESTED2_KEYS", key + "." + key2, sorted(value2[0].keys()))
+                  print("CONTEXT", repr(text[max(0,at-300):at+1000]))
+          routes = sorted(set(re.findall(r'/(?:api/)?(?:pinedrama|dramabox|reelshort|shortmax|freereels|dramanova|anime|moviebox)/[A-Za-z0-9_./?=&{}:-]+', text)))
+          for route in routes:
+              print("ROUTE", route)
+          print("ROUTE_COUNT", len(routes))
           PY
