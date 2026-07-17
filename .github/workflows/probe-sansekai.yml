@@ -15,22 +15,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Extract routes from the published docs
+      - name: Parse the published OpenAPI contract
         shell: bash
         run: |
           set -euo pipefail
           curl -fsSL --retry 2 https://api.sansekai.my.id/ -o /tmp/index.html
-          python3 - <<'PY'
-          import pathlib, re
-          text = pathlib.Path("/tmp/index.html").read_text("utf-8", errors="ignore")
-          print("HTML_BYTES", len(text))
-          for needle in ("openapi", "SwaggerUIBundle", "paths", "spec:"):
-              at = text.find(needle)
-              print("MARKER", needle, at)
-              if at >= 0:
-                  print("CONTEXT", repr(text[max(0,at-300):at+1000]))
-          routes = sorted(set(re.findall(r'/(?:api/)?(?:pinedrama|dramabox|reelshort|shortmax|freereels|dramanova|anime|moviebox)/[A-Za-z0-9_./?=&{}:-]+', text)))
-          for route in routes:
-              print("ROUTE", route)
-          print("ROUTE_COUNT", len(routes))
-          PY
+          node <<'NODE'
+          const fs = require("fs");
+          const vm = require("vm");
+          const html = fs.readFileSync("/tmp/index.html", "utf8");
+          const start = html.indexOf("const spec =") + "const spec =".length;
+          const end = html.indexOf("// Inisialisasi Swagger UI", start);
+          const literal = html.slice(start, end).trim().replace(/;\s*$/, "");
+          const spec = vm.runInNewContext("(" + literal + ")", Object.create(null), { timeout: 1000 });
+          console.log("OPENAPI", spec.info.title, spec.info.version, "paths=" + Object.keys(spec.paths).length);
+          for (const [path, pathItem] of Object.entries(spec.paths)) {
+            for (const [method, op] of Object.entries(pathItem)) {
+              if (!["get","post","put","patch","delete"].includes(method)) continue;
+              const params = (op.parameters || []).map(p => p.name + "@" + p.in + ":" + (p.schema?.type || "?") + (p.required ? "*" : "")).join(",");
+              console.log("CONTRACT", method.toUpperCase(), path, "|", op.summary || "", "|", params);
+            }
+          }
+          NODE
