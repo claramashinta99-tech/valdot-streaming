@@ -22,7 +22,6 @@ export default defineConfig(async () => {
           name: "valdot-streaming",
           main: "./worker/index.ts",
           compatibility_date: "2026-07-17",
-          compatibility_flags: ["nodejs_compat"],
         },
       }),
     ],
