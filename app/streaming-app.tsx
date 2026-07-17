@@ -27,6 +27,8 @@ type Episode = {
 };
 type JsonObject = Record<string, unknown>;
 
+const SANSEKAI_BASE = "https://api.sansekai.my.id/api";
+
 const MODES: Mode[] = [
   { id: "pilihan", label: "Pilihan", platform: "dramabox", feed: "trending", caption: "Drama pendek pilihan hari ini" },
   { id: "dracin", label: "Dracin", platform: "dramabox", feed: "trending", caption: "Drama China pendek terpopuler" },
@@ -79,9 +81,120 @@ function apiUrl(platform: Platform, action: string, params: Record<string, strin
   return `/api/sansekai?${query.toString()}`;
 }
 
+function directApiUrl(platform: Platform, action: string, params: Record<string, string | number>) {
+  const query = new URLSearchParams();
+  const id = String(params.id ?? "");
+  let endpoint = "";
+
+  if (action === "home") {
+    endpoint = `/${platform}/${params.feed}`;
+  } else if (action === "search") {
+    endpoint = `/${platform}/search`;
+    query.set("query", String(params.query ?? ""));
+  } else if (action === "detail") {
+    const detail: Record<Platform, [string, string]> = {
+      pinedrama: ["detail", "collection_id"],
+      dramabox: ["allepisode", "bookId"],
+      reelshort: ["detail", "bookId"],
+      shortmax: ["detail", "shortPlayId"],
+      freereels: ["detailAndAllEpisode", "key"],
+      dramanova: ["detail", "dramaId"],
+      anime: ["detail", "urlId"],
+      moviebox: ["detail", "subjectId"],
+    };
+    endpoint = `/${platform}/${detail[platform][0]}`;
+    query.set(detail[platform][1], id);
+    if (params.season) query.set("season", String(params.season));
+  } else if (action === "play") {
+    const play: Record<Exclude<Platform, "freereels">, [string, string]> = {
+      pinedrama: ["episode", "collection_id"],
+      dramabox: ["decrypt", "url"],
+      reelshort: ["episode", "bookId"],
+      shortmax: ["episode", "shortPlayId"],
+      dramanova: ["getvideo", "fileId"],
+      anime: ["getvideo", "chapterUrlId"],
+      moviebox: ["get-download-url", "subjectId"],
+    };
+    if (platform === "freereels") throw new Error("Video FreeReels tersedia dari detail episode.");
+    endpoint = `/${platform}/${play[platform][0]}`;
+    query.set(play[platform][1], platform === "dramabox" ? String(params.url ?? "") : id);
+    if (["pinedrama", "reelshort", "shortmax"].includes(platform)) {
+      query.set("episodeNumber", String(params.episode ?? 1));
+    }
+    if (platform === "anime") query.set("reso", String(params.quality ?? "480p"));
+    if (platform === "moviebox") {
+      query.set("episode", String(params.episode ?? 0));
+      query.set("season", String(params.season ?? 0));
+    }
+  }
+
+  const suffix = query.toString();
+  return `${SANSEKAI_BASE}${endpoint}${suffix ? `?${suffix}` : ""}`;
+}
+
+function normalizeDirectCatalog(platform: Platform, raw: unknown): MediaItem[] {
+  const seen = new Set<string>();
+  return walkObjects(raw).flatMap((object): MediaItem[] => {
+    const id = textOf(object, [
+      "collection_id", "collectionId", "bookId", "book_id", "shortPlayId", "key",
+      "dramaId", "drama_id", "urlId", "subjectId", "subject_id", "series_id", "slug", "id",
+    ]);
+    const title = textOf(object, [
+      "title", "bookName", "book_title", "name", "shortPlayName", "judul",
+      "subjectTitle", "dramaName", "seriesName", "collectionName", "anime_name", "movieName",
+    ]);
+    const cover = textOf(object, [
+      "cover", "coverWap", "cover_url", "coverUrl", "picUrl", "poster", "posterImg",
+      "image", "thumbnail", "subjectCover", "verticalCover", "collectionCover", "anime_cover",
+    ]);
+    if (!id || !title || !/^https?:\/\//i.test(cover)) return [];
+    const key = `${platform}:${id}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+
+    const rawTags = object.tags ?? object.tag ?? object.categories ?? object.content_tags;
+    const tags = Array.isArray(rawTags)
+      ? rawTags.flatMap((tag) => {
+          if (typeof tag === "string") return tag;
+          return isObject(tag) ? textOf(tag, ["tagName", "name", "title"]) : [];
+        }).filter(Boolean).slice(0, 4)
+      : typeof rawTags === "string"
+        ? rawTags.split(",").map((tag) => tag.trim()).filter(Boolean).slice(0, 4)
+        : [];
+
+    return [{
+      id,
+      title,
+      cover,
+      description: textOf(object, ["description", "introduction", "desc", "summary", "synopsis"]),
+      episodes: numberOf(object, [
+        "total_episodes", "chapterCount", "totalEpisodes", "episode_count", "episodeCount",
+        "updateEpisode", "chapter_count", "totalEpisode",
+      ]),
+      tags,
+      platform,
+    }];
+  }).slice(0, 60);
+}
+
+async function callDirectApi(platform: Platform, action: string, params: Record<string, string | number>) {
+  const response = await fetch(directApiUrl(platform, action, params), {
+    headers: { Accept: "application/json" },
+    mode: "cors",
+  });
+  const raw = await response.json().catch(() => null);
+  if (!response.ok || raw === null) throw new Error(`Sansekai menolak akses browser (${response.status}).`);
+  return action === "home" || action === "search"
+    ? { items: normalizeDirectCatalog(platform, raw) }
+    : { data: raw };
+}
+
 async function callApi(platform: Platform, action: string, params: Record<string, string | number> = {}) {
   const response = await fetch(apiUrl(platform, action, params));
   const payload = await response.json().catch(() => ({ error: "Respons server tidak valid." }));
+  if (response.status === 403 && action !== "media") {
+    return callDirectApi(platform, action, params);
+  }
   if (!response.ok || payload.error) throw new Error(payload.error ?? "Konten gagal dimuat.");
   return payload;
 }
