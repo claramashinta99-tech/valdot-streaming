@@ -28,7 +28,7 @@ type Episode = {
 type JsonObject = Record<string, unknown>;
 
 const MODES: Mode[] = [
-  { id: "pilihan", label: "Pilihan", platform: "pinedrama", feed: "trending", caption: "Drama pendek pilihan hari ini" },
+  { id: "pilihan", label: "Pilihan", platform: "dramabox", feed: "trending", caption: "Drama pendek pilihan hari ini" },
   { id: "dracin", label: "Dracin", platform: "dramabox", feed: "trending", caption: "Drama China pendek terpopuler" },
   { id: "anime", label: "Anime", platform: "anime", feed: "latest", caption: "Anime terbaru subtitle Indonesia" },
   { id: "drakor", label: "Drakor", platform: "moviebox", feed: "k-drama", caption: "Serial Korea dalam satu tempat" },
@@ -354,7 +354,7 @@ export default function StreamingApp() {
               </div>
               <div className="watch-meta">
                 <div>
-                  <span className="kicker">SEDANG DIPUTAR · {MODES.find((item) => item.platform === selected.platform)?.label ?? selected.platform}</span>
+                  <span className="kicker">SEDANG DIPUTAR Â· {MODES.find((item) => item.platform === selected.platform)?.label ?? selected.platform}</span>
                   <h1>{selected.title}</h1>
                   <p>Episode {currentEpisode.number}</p>
                 </div>
@@ -370,8 +370,8 @@ export default function StreamingApp() {
           ) : (
             <div className="detail-cover" style={{ backgroundImage: `linear-gradient(90deg, rgba(8,11,10,.98) 8%, rgba(8,11,10,.72) 58%, rgba(8,11,10,.2)), url("${selected.cover}")` }}>
               <div className="detail-copy">
-                <button className="ghost-button" onClick={goHome}>← Kembali</button>
-                <span className="kicker">{mode.label.toUpperCase()} · TANPA LOGIN</span>
+                <button className="ghost-button" onClick={goHome}>â† Kembali</button>
+                <span className="kicker">{mode.label.toUpperCase()} Â· TANPA LOGIN</span>
                 <h1>{selected.title}</h1>
                 <p>{selected.description || "Pilih episode dan langsung mulai menonton."}</p>
                 <div className="tag-row">
@@ -379,7 +379,7 @@ export default function StreamingApp() {
                   {selected.tags.map((tag) => <span key={tag}>{tag}</span>)}
                 </div>
                 <button className="accent-button" disabled={!episodes.length || playerLoading} onClick={() => episodes[0] && playEpisode(episodes[0])}>
-                  {playerLoading ? "Menyiapkan…" : "▶ Mulai menonton"}
+                  {playerLoading ? "Menyiapkanâ€¦" : "â–¶ Mulai menonton"}
                 </button>
               </div>
             </div>
@@ -392,11 +392,11 @@ export default function StreamingApp() {
             <span>{episodes.length} episode</span>
           </div>
           {error && <Notice message={error} />}
-          {detailLoading ? <div className="loading-line">Mengambil semua episode…</div> : (
+          {detailLoading ? <div className="loading-line">Mengambil semua episodeâ€¦</div> : (
             <div className="episode-grid">
               {episodes.map((episode) => (
                 <button key={`${episode.number}-${episode.playId ?? ""}`} className={currentEpisode?.number === episode.number ? "active" : ""} onClick={() => playEpisode(episode)} disabled={playerLoading}>
-                  <strong>{currentEpisode?.number === episode.number ? "▶" : String(episode.number).padStart(2, "0")}</strong>
+                  <strong>{currentEpisode?.number === episode.number ? "â–¶" : String(episode.number).padStart(2, "0")}</strong>
                   <span>{episode.title}</span>
                 </button>
               ))}
@@ -424,7 +424,7 @@ export default function StreamingApp() {
           <span className="kicker">{activeQuery ? "HASIL PENCARIAN" : mode.caption.toUpperCase()}</span>
           <h1>{featured?.title ?? "Satu tempat untuk semua cerita."}</h1>
           <p>{featured?.description || "Dracin, drakor, anime, dan film pilihan. Langsung nonton tanpa akun."}</p>
-          {featured && <button className="accent-button" onClick={() => openItem(featured)}>Lihat episode <span>↗</span></button>}
+          {featured && <button className="accent-button" onClick={() => openItem(featured)}>Lihat episode <span>â†—</span></button>}
         </div>
         <div className="hero-mark">V</div>
       </section>
@@ -433,7 +433,7 @@ export default function StreamingApp() {
         <div className="section-title">
           <div>
             <span className="kicker">{activeQuery ? "DITEMUKAN UNTUKMU" : "KOLEKSI TERBARU"}</span>
-            <h2>{activeQuery ? `“${activeQuery}”` : mode.label}</h2>
+            <h2>{activeQuery ? `â€œ${activeQuery}â€` : mode.label}</h2>
           </div>
           <span>{items.length} judul</span>
         </div>
@@ -446,11 +446,11 @@ export default function StreamingApp() {
               <button className="media-card" key={`${item.platform}-${item.id}`} onClick={() => openItem(item)}>
                 <div className="poster">
                   <img src={item.cover} alt="" loading="lazy" />
-                  <span className="poster-action">▶</span>
+                  <span className="poster-action">â–¶</span>
                   {!!item.episodes && <span className="episode-badge">{item.episodes} EP</span>}
                 </div>
                 <strong>{item.title}</strong>
-                <span>{mode.label}{item.tags[0] ? ` · ${item.tags[0]}` : ""}</span>
+                <span>{mode.label}{item.tags[0] ? ` Â· ${item.tags[0]}` : ""}</span>
               </button>
             ))}
           </div>
@@ -471,8 +471,8 @@ function Header({ query, setQuery, submitSearch, onBrand }: {
     <header className="topbar">
       <button className="brand" onClick={onBrand}>VAL<span>DOT</span></button>
       <form className="search-box" onSubmit={submitSearch}>
-        <span>⌕</span>
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari drama, anime, atau film…" aria-label="Cari konten" />
+        <span>âŒ•</span>
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari drama, anime, atau filmâ€¦" aria-label="Cari konten" />
         <button type="submit">Cari</button>
       </form>
       <div className="no-login">TANPA LOGIN <i /></div>
@@ -489,7 +489,8 @@ function Footer() {
     <footer>
       <div className="brand">VAL<span>DOT</span></div>
       <p>Agregator pemutar tanpa login. Data dan video berasal dari Sansekai API.</p>
-      <a href="https://api.sansekai.my.id" target="_blank" rel="noreferrer">Sumber API ↗</a>
+      <a href="https://api.sansekai.my.id" target="_blank" rel="noreferrer">Sumber API â†—</a>
     </footer>
   );
 }
+
