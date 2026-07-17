@@ -19,7 +19,7 @@ type CatalogItem = {
 };
 
 const HOME_FEEDS: Record<Platform, string[]> = {
-  pinedrama: ["trending", "foryou"],
+  pinedrama: ["foryou", "trending"],
   dramabox: ["trending", "latest", "dubindo", "vip", "foryou"],
   reelshort: ["homepage", "foryou"],
   shortmax: ["latest", "rekomendasi", "vip", "foryou"],
@@ -72,14 +72,16 @@ function normalizeCatalog(platform: Platform, payload: unknown) {
   walk(payload, (object) => {
     const title = firstString(object, [
       "title", "bookName", "book_title", "name", "shortPlayName", "judul",
-      "subjectTitle", "subject", "dramaName", "seriesName",
+      "subjectTitle", "subject", "dramaName", "seriesName", "collectionName",
+      "anime_name", "movieName",
     ]);
     const cover = firstString(object, [
       "cover", "coverWap", "cover_url", "coverUrl", "picUrl", "poster",
       "posterImg", "image", "thumbnail", "subjectCover", "verticalCover",
+      "collectionCover", "anime_cover",
     ]);
     let id = firstString(object, [
-      "collection_id", "bookId", "book_id", "shortPlayId", "key", "dramaId",
+      "collection_id", "collectionId", "bookId", "book_id", "shortPlayId", "key", "dramaId",
       "drama_id", "urlId", "subjectId", "subject_id", "series_id", "slug",
     ]);
     if (!id && platform === "anime") id = firstString(object, ["url"]);
@@ -104,7 +106,7 @@ function normalizeCatalog(platform: Platform, payload: unknown) {
       description: firstString(object, ["description", "introduction", "desc", "summary", "synopsis"]),
       episodes: firstNumber(object, [
         "total_episodes", "chapterCount", "totalEpisodes", "episode_count",
-        "episodeCount", "updateEpisode", "chapter_count",
+        "episodeCount", "updateEpisode", "chapter_count", "totalEpisode",
       ]),
       tags,
       platform,
@@ -177,13 +179,32 @@ async function fetchJson(url: string, ttl: number) {
   if (cached && cached.until > Date.now()) return cached;
 
   const response = await fetch(url, {
-    headers: { Accept: "application/json", "User-Agent": "Valdot/2.0" },
-    cache: "no-store",
-  });
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+      Referer: "https://api.sansekai.my.id/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138 Safari/537.36",
+    },
+    redirect: "follow",
+    cf: { cacheEverything: true, cacheTtl: Math.max(60, Math.floor(ttl / 1000)) },
+  } as RequestInit & { cf: { cacheEverything: boolean; cacheTtl: number } });
   const payload = await response.json().catch(() => ({ error: "Respons API tidak valid." }));
   const result = { until: Date.now() + ttl, status: response.status, payload };
   if (response.ok) cache.set(url, result);
   return result;
+}
+
+function homeCandidates(platform: Platform, params: URLSearchParams) {
+  const requested = params.get("feed") ?? HOME_FEEDS[platform][0];
+  const feeds = [requested, ...HOME_FEEDS[platform]].filter(
+    (feed, index, values) => HOME_FEEDS[platform].includes(feed) && values.indexOf(feed) === index,
+  );
+  const urls = feeds.slice(0, 3).map((feed) => {
+    const candidate = new URLSearchParams(params);
+    candidate.set("feed", feed);
+    return upstreamUrl(platform, "home", candidate);
+  });
+  return urls;
 }
 
 function mediaProxyUrl(request: NextRequest, url: string) {
@@ -276,27 +297,49 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const upstream = upstreamUrl(platform, action, request.nextUrl.searchParams);
     const ttl = action === "play" ? 5 * 60_000 : action === "search" ? 3 * 60_000 : 15 * 60_000;
-    const result = await fetchJson(upstream, ttl);
-    if (result.status === 429) {
+    const upstreams = action === "home"
+      ? homeCandidates(platform, request.nextUrl.searchParams)
+      : [upstreamUrl(platform, action, request.nextUrl.searchParams)];
+    let lastStatus = 502;
+    let sawRateLimit = false;
+
+    for (const upstream of upstreams) {
+      const result = await fetchJson(upstream, ttl);
+      lastStatus = result.status;
+      if (result.status === 429) {
+        sawRateLimit = true;
+        break;
+      }
+      if (result.status >= 400) continue;
+
+      if (action === "home" || action === "search") {
+        const items = normalizeCatalog(platform, result.payload);
+        if (items.length || action === "search") {
+          return NextResponse.json({ items }, {
+            headers: { "Cache-Control": `public, s-maxage=${Math.floor(ttl / 1000)}, stale-while-revalidate=3600` },
+          });
+        }
+        continue;
+      }
+
+      return NextResponse.json({ data: result.payload }, {
+        headers: { "Cache-Control": `public, s-maxage=${Math.floor(ttl / 1000)}, stale-while-revalidate=300` },
+      });
+    }
+
+    if (sawRateLimit) {
       return NextResponse.json({
         error: "API Sansekai sedang mencapai batas 10 request per menit. Tunggu sebentar lalu coba lagi.",
       }, { status: 429, headers: { "Retry-After": "60" } });
     }
-    if (result.status >= 400) {
-      return NextResponse.json({ error: "Konten dari Sansekai sedang tidak tersedia." }, { status: result.status });
-    }
-
-    const payload = action === "home" || action === "search"
-      ? { items: normalizeCatalog(platform, result.payload) }
-      : { data: result.payload };
-    return NextResponse.json(payload, {
-      headers: { "Cache-Control": `public, s-maxage=${Math.floor(ttl / 1000)}, stale-while-revalidate=300` },
-    });
+    return NextResponse.json({
+      error: `Konten Sansekai belum dapat dimuat (upstream ${lastStatus}).`,
+    }, { status: lastStatus });
   } catch (error) {
     return NextResponse.json({
       error: error instanceof Error ? error.message : "Layanan konten tidak dapat dijangkau.",
     }, { status: 502 });
   }
 }
+
